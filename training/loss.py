@@ -124,7 +124,7 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 loss_Gmain = torch.nn.functional.softplus(-gen_logits) # -log(sigmoid(gen_logits))
                 if do_ewc:
-                    loss_Gmain += (self.ewc_lmbda * self.ewc.penalty(self.G_synthesis))
+                    loss_Gmain = loss_Gmain + self.ewc_lmbda * self.ewc.penalty(self.G_synthesis)
                 training_stats.report('Loss/G/loss', loss_Gmain)
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()
