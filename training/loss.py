@@ -36,6 +36,7 @@ class EWC(object):
             self._means[n] = p.data
 
     def _diag_fisher(self):
+        print('Computing EWC Fisher')
         precision_matrices = {}
         for n, p in deepcopy(self.G_params).items():
             p.data.zero_()

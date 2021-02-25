@@ -147,10 +147,6 @@ def setup_training_loop_kwargs(
     # Base config: cfg, gamma, kimg, batch
     # ------------------------------------
 
-    if ewc is None:
-        ewc = 0
-    args.ewc = ewc
-
     if cfg is None:
         cfg = 'auto'
     assert isinstance(cfg, str)
@@ -189,13 +185,17 @@ def setup_training_loop_kwargs(
 
     args.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
     args.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
-    args.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss', r1_gamma=spec.gamma, ewc_lmbda=args.ewc)
+    args.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss', r1_gamma=spec.gamma)
 
     args.total_kimg = spec.kimg
     args.batch_size = spec.mb
     args.batch_gpu = spec.mb // spec.ref_gpus
     args.ema_kimg = spec.ema
     args.ema_rampup = spec.ramp
+
+    if not ewc:
+        ewc = 0.0
+    args.loss_kwargs.ewc_lmbda = ewc
 
     if cfg == 'cifar':
         args.loss_kwargs.pl_weight = 0 # disable path length regularization
