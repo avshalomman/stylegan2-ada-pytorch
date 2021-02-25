@@ -49,7 +49,7 @@ class EWC(object):
         gen_img, _gen_ws = self.loss.run_G(self.zs, self.cs, sync=False) # TODO handle multi process
         gen_logits = self.loss.run_D(gen_img, self.cs, sync=False)
         loss = torch.nn.functional.softplus(-gen_logits)  # -log(sigmoid(gen_logits))
-        loss.backward()
+        loss.mean().backward()
         for n, p in self.G.named_parameters():
             precision_matrices[n].data += p.grad.data ** 2 / len(self.real_images)
 
