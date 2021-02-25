@@ -5,12 +5,14 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+from copy import deepcopy
 
 import numpy as np
 import torch
 from torch_utils import training_stats
 from torch_utils import misc
 from torch_utils.ops import conv2d_gradfix
+
 
 #----------------------------------------------------------------------------
 
@@ -19,9 +21,51 @@ class Loss:
         raise NotImplementedError()
 
 #----------------------------------------------------------------------------
+class EWC(object):
+    def __init__(self, G, D, zs, cs, loss):
+        self.G = G
+        self.D = D
+        self.zs = zs
+        self.cs = cs # Conditional generation is not tested
+        self.loss = loss
+        self.G_params = {n: p for n, p in self.G.named_parameters() if p.requires_grad}
+        self._means = {}
+        self._precision_matrices = self._diag_fisher()
+
+        for n, p in deepcopy(self.G_params).items():
+            self._means[n] = p.data
+
+    def _diag_fisher(self):
+        precision_matrices = {}
+        for n, p in deepcopy(self.G_params).items():
+            p.data.zero_()
+            precision_matrices[n] = p.data
+
+        self.D.eval()
+        self.G.eval()
+        self.D.zero_grad()
+        self.G.zero_grad()
+        gen_img, _gen_ws = self.loss.run_G(self.zs, self.cs, sync=False) # TODO handle multi process
+        gen_logits = self.loss.run_D(gen_img, self.cs, sync=False)
+        loss = torch.nn.functional.softplus(-gen_logits)  # -log(sigmoid(gen_logits))
+        loss.backward()
+        for n, p in self.G.named_parameters():
+            precision_matrices[n].data += p.grad.data ** 2 / len(self.real_images)
+
+        precision_matrices = {n: p for n, p in precision_matrices.items()}
+        self.D.train()
+        self.G.train()
+        return precision_matrices
+
+    def penalty(self, G):
+        loss = 0
+        for n, p in G.named_parameters():
+            _loss = self._precision_matrices[n] * (p - self._means[n]) ** 2
+            loss += _loss.sum()
+        return loss
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0.9, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=2):
+    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0.9, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=2, ewc_lmbda = 0.0):
         super().__init__()
         self.device = device
         self.G_mapping = G_mapping
@@ -34,6 +78,8 @@ class StyleGAN2Loss(Loss):
         self.pl_decay = pl_decay
         self.pl_weight = pl_weight
         self.pl_mean = torch.zeros([], device=device)
+        self.ewc_lmbda = ewc_lmbda
+        self.ewc = None
 
     def run_G(self, z, c, sync):
         with misc.ddp_sync(self.G_mapping, sync):
@@ -55,11 +101,16 @@ class StyleGAN2Loss(Loss):
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
+
+        if self.ewc_lmbda > 0.0 and not self.ewc:
+            self.ewc = EWC(self.G_synthesis, self.D, gen_z, gen_c, self)
+
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         do_Gmain = (phase in ['Gmain', 'Gboth'])
         do_Dmain = (phase in ['Dmain', 'Dboth'])
         do_Gpl   = (phase in ['Greg', 'Gboth']) and (self.pl_weight != 0)
         do_Dr1   = (phase in ['Dreg', 'Dboth']) and (self.r1_gamma != 0)
+        do_ewc   = self.ewc_lmbda > 0
 
         # Gmain: Maximize logits for generated images.
         if do_Gmain:
@@ -69,6 +120,8 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 loss_Gmain = torch.nn.functional.softplus(-gen_logits) # -log(sigmoid(gen_logits))
+                if do_ewc:
+                    loss_Gmain += (self.ewc_lmbda * self.ewc.penalty(self.G_synthesis))
                 training_stats.report('Loss/G/loss', loss_Gmain)
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()

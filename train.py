@@ -57,6 +57,7 @@ def setup_training_loop_kwargs(
     # Transfer learning.
     resume     = None, # Load previous network: 'noresume' (default), 'ffhq256', 'ffhq512', 'ffhq1024', 'celebahq256', 'lsundog256', <file>, <url>
     freezed    = None, # Freeze-D: <int>, default = 0 discriminator layers
+    ewc        = None,  # Elastic Weight Consolidation for few-show transfer learning
 
     # Performance options (not included in desc).
     fp32       = None, # Disable mixed-precision training: <bool>, default = False
@@ -146,6 +147,10 @@ def setup_training_loop_kwargs(
     # Base config: cfg, gamma, kimg, batch
     # ------------------------------------
 
+    if ewc is None:
+        ewc = 0
+    args.ewc = ewc
+
     if cfg is None:
         cfg = 'auto'
     assert isinstance(cfg, str)
@@ -184,7 +189,7 @@ def setup_training_loop_kwargs(
 
     args.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
     args.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
-    args.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss', r1_gamma=spec.gamma)
+    args.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss', r1_gamma=spec.gamma, ewc_lmbda=args.ewc)
 
     args.total_kimg = spec.kimg
     args.batch_size = spec.mb
@@ -427,6 +432,7 @@ class CommaSeparatedList(click.ParamType):
 # Transfer learning.
 @click.option('--resume', help='Resume training [default: noresume]', metavar='PKL')
 @click.option('--freezed', help='Freeze-D [default: 0 layers]', type=int, metavar='INT')
+@click.option('--ewc', help='Elastic Weight Consolidation lambda [default: 0.0]', type=float, metavar='FLOAT')
 
 # Performance options.
 @click.option('--fp32', help='Disable mixed-precision training', type=bool, metavar='BOOL')
