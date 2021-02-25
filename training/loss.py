@@ -51,7 +51,7 @@ class EWC(object):
         loss = torch.nn.functional.softplus(-gen_logits)  # -log(sigmoid(gen_logits))
         loss.mean().backward()
         for n, p in self.G.named_parameters():
-            precision_matrices[n].data += p.grad.data ** 2 / len(self.real_images)
+            precision_matrices[n].data += p.grad.data ** 2# / len(self.real_images)
 
         precision_matrices = {n: p for n, p in precision_matrices.items()}
         self.D.train()
