@@ -56,6 +56,8 @@ class EWC(object):
         precision_matrices = {n: p for n, p in precision_matrices.items()}
         self.D.train()
         self.G.train()
+        self.D.zero_grad()
+        self.G.zero_grad()
         return precision_matrices
 
     def penalty(self, G):
